@@ -26,7 +26,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - run: npm ci
+      - run: npm install --ignore-scripts
 
       - name: TypeScript type check
         run: npx tsc --noEmit -p packages/core-proto/tsconfig.json || true
@@ -64,7 +64,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - run: npm ci
+      - run: npm install --ignore-scripts
 
       - name: Init database
         run: psql -h localhost -U ebug -d ebug -f infra/db/init.sql
@@ -95,7 +95,7 @@ jobs:
 
       - name: Build
         working-directory: services/ingestion-worker
-        run: go build -v ./...
+        run: go mod tidy && go build -v ./...
 
       - name: Vet
         working-directory: services/ingestion-worker
@@ -151,7 +151,7 @@ jobs:
 
       - name: Install
         working-directory: apps/dashboard
-        run: npm ci
+        run: npm install
 
       - name: Build
         working-directory: apps/dashboard
@@ -216,7 +216,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - run: npm ci
+      - run: npm install --ignore-scripts
 
       - name: Init database
         run: psql -h localhost -U ebug -d ebug -f infra/db/init.sql

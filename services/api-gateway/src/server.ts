@@ -597,6 +597,66 @@ async function runMigrations() {
       ON CONFLICT (id) DO NOTHING;
     `);
 
+    // Seed sample bugs for initial dashboard demo
+    await pool.query(`
+      INSERT INTO bug_reports (id, external_id, org_id, source_type, source_ide, title, description,
+        stack_trace, file_path, line_number, severity, severity_score, category, status, priority,
+        assignee_id, team_id, created_at, updated_at)
+      VALUES
+        ('d0000000-0000-0000-0000-000000000001', 'EBUG-1001', 'a0000000-0000-0000-0000-000000000001',
+         'vscode', 'VS Code', 'NullPointerException in UserService.authenticate',
+         'Authentication fails when user session expires during active request',
+         'java.lang.NullPointerException\n  at UserService.authenticate(UserService.java:142)\n  at AuthController.login(AuthController.java:58)',
+         'src/services/UserService.java', 142, 'critical', 0.95, 'runtime',
+         'open', 1, 'b0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001',
+         NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour'),
+
+        ('d0000000-0000-0000-0000-000000000002', 'EBUG-1002', 'a0000000-0000-0000-0000-000000000001',
+         'api', 'IntelliJ', 'Memory leak in WebSocket connection pool',
+         'Connections not properly closed on client disconnect, causing OOM after 4 hours',
+         'OutOfMemoryError: Java heap space\n  at ConnectionPool.acquire(ConnectionPool.java:89)',
+         'src/ws/ConnectionPool.java', 89, 'high', 0.82, 'performance',
+         'in_progress', 2, 'b0000000-0000-0000-0000-000000000002', 'c0000000-0000-0000-0000-000000000001',
+         NOW() - INTERVAL '5 hours', NOW() - INTERVAL '3 hours'),
+
+        ('d0000000-0000-0000-0000-000000000003', 'EBUG-1003', 'a0000000-0000-0000-0000-000000000001',
+         'vscode', 'VS Code', 'CSS grid layout broken on Safari 17',
+         'Dashboard grid items overlap on Safari due to unsupported gap property fallback',
+         '', 'src/components/Dashboard.css', 45, 'medium', 0.55, 'ui',
+         'triaged', 3, NULL, 'c0000000-0000-0000-0000-000000000002',
+         NOW() - INTERVAL '1 day', NOW() - INTERVAL '12 hours'),
+
+        ('d0000000-0000-0000-0000-000000000004', 'EBUG-1004', 'a0000000-0000-0000-0000-000000000001',
+         'api', 'VS Code', 'Race condition in database migration runner',
+         'Parallel deployments can cause duplicate schema operations',
+         'ERROR: relation "users" already exists', 'infra/migrate.ts', 23, 'high', 0.78, 'infrastructure',
+         'open', 2, 'b0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001',
+         NOW() - INTERVAL '6 hours', NOW() - INTERVAL '4 hours'),
+
+        ('d0000000-0000-0000-0000-000000000005', 'EBUG-1005', 'a0000000-0000-0000-0000-000000000001',
+         'vscode', 'VS Code', 'API rate limiter not resetting after window expires',
+         'Rate limit counter persists beyond TTL window causing permanent 429 responses',
+         '', 'src/middleware/rateLimiter.ts', 67, 'medium', 0.61, 'api',
+         'resolved', 3, 'b0000000-0000-0000-0000-000000000002', 'c0000000-0000-0000-0000-000000000001',
+         NOW() - INTERVAL '3 days', NOW() - INTERVAL '1 day'),
+
+        ('d0000000-0000-0000-0000-000000000006', 'EBUG-1006', 'a0000000-0000-0000-0000-000000000001',
+         'api', 'IntelliJ', 'Incorrect timezone conversion in analytics export',
+         'CSV exports show UTC instead of user-configured timezone',
+         '', 'src/services/AnalyticsExporter.java', 210, 'low', 0.35, 'data',
+         'open', 4, NULL, 'c0000000-0000-0000-0000-000000000002',
+         NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days'),
+
+        ('d0000000-0000-0000-0000-000000000007', 'EBUG-1007', 'a0000000-0000-0000-0000-000000000001',
+         'vscode', 'VS Code', 'Unhandled promise rejection in event bus',
+         'Event listeners throwing errors crash the entire event loop',
+         'UnhandledPromiseRejection: TypeError: Cannot read property of undefined\n  at EventBus.emit(EventBus.ts:34)',
+         'src/core/EventBus.ts', 34, 'critical', 0.91, 'runtime',
+         'open', 1, 'b0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001',
+         NOW() - INTERVAL '30 minutes', NOW() - INTERVAL '15 minutes')
+      ON CONFLICT (id) DO NOTHING;
+    `);
+
     logger.info('Database migrations completed successfully');
   } catch (err) {
     logger.error({ err }, 'Database migration failed');
