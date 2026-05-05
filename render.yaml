@@ -1,14 +1,12 @@
 # eBug Tracking — Render Blueprint
 # Deploy everything with one click: https://render.com/deploy
-# This file defines all backend services + databases
 
 databases:
   - name: ebug-postgres
     plan: free
     databaseName: ebug
     user: ebug
-    ipAllowList: []  # Allow all (required for free tier)
-    postgresMajorVersion: "16"
+    ipAllowList: []
 
 services:
   # ── API Gateway (Node.js) ──
@@ -17,7 +15,7 @@ services:
     runtime: node
     plan: free
     rootDir: services/api-gateway
-    buildCommand: npm install && npx tsc
+    buildCommand: npm install --production=false && npx tsc
     startCommand: node dist/server.js
     healthCheckPath: /health
     envVars:
@@ -32,11 +30,11 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: NATS_URL
-        value: ""  # Leave empty — API Gateway has a direct-DB fallback
+        value: ""
       - key: LOG_LEVEL
         value: info
       - key: EBUG_DEV_MODE
-        value: "false"
+        value: "true"
 
   # ── WebSocket Hub (Node.js) ──
   - type: web
@@ -44,7 +42,7 @@ services:
     runtime: node
     plan: free
     rootDir: services/ws-hub
-    buildCommand: npm install && npx tsc
+    buildCommand: npm install --production=false && npx tsc
     startCommand: node dist/server.js
     healthCheckPath: /health
     envVars:
@@ -57,7 +55,7 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: EBUG_DEV_MODE
-        value: "false"
+        value: "true"
       - key: LOG_LEVEL
         value: info
 
@@ -67,11 +65,13 @@ services:
     runtime: go
     plan: free
     rootDir: services/ingestion-worker
-    buildCommand: go build -o app .
+    buildCommand: go mod tidy && go build -o app .
     startCommand: ./app
     healthCheckPath: /health
     envVars:
       - key: PORT
+        value: "10000"
+      - key: HTTP_PORT
         value: "10000"
       - key: DATABASE_URL
         fromDatabase:
@@ -92,6 +92,7 @@ services:
     rootDir: services/severity-scorer
     buildCommand: pip install -r requirements.txt
     startCommand: python -u main.py
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: "10000"
@@ -102,7 +103,7 @@ services:
       - key: NATS_URL
         value: ""
       - key: LOG_LEVEL
-        value: info
+        value: INFO
 
   # ── Dedup Engine (Python) ──
   - type: web
@@ -112,6 +113,7 @@ services:
     rootDir: services/dedup-engine
     buildCommand: pip install -r requirements.txt
     startCommand: python -u main.py
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: "10000"
@@ -136,6 +138,7 @@ services:
     rootDir: services/root-cause-analyzer
     buildCommand: pip install -r requirements.txt
     startCommand: python -u main.py
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: "10000"
@@ -152,4 +155,4 @@ services:
       - key: LLM_MODEL
         value: gpt-4o
       - key: LOG_LEVEL
-        value: info
+        value: INFO

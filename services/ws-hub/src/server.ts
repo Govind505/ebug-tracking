@@ -117,14 +117,11 @@ function verifyToken(token: string): { userId: string; orgId: string } | null {
 
 async function startServer() {
   const PORT = parseInt(process.env.PORT ?? '8082', 10);
-  const NATS_URL = process.env.NATS_URL ?? 'nats://localhost:4222';
-
-  // Connect to NATS
-  const nc = await connect({ servers: NATS_URL });
-  const js = nc.jetstream();
-  logger.info({ url: NATS_URL }, 'Connected to NATS');
+  const NATS_URL = process.env.NATS_URL ?? '';
 
   // HTTP server for health checks
+  const registry = new ConnectionRegistry();
+
   const httpServer = createServer((req, res) => {
     if (req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -137,7 +134,6 @@ async function startServer() {
 
   // WebSocket server
   const wss = new WebSocketServer({ server: httpServer, path: '/ws/v1/stream' });
-  const registry = new ConnectionRegistry();
 
   wss.on('connection', (ws, req) => {
     const url = new URL(req.url ?? '', `http://localhost:${PORT}`);
@@ -174,11 +170,13 @@ async function startServer() {
 
     registry.add(sessionId, session);
 
-    // Handle client messages
+    // Handle client messages (js may be null if NATS unavailable)
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString());
-        handleClientMessage(sessionId, session, msg, js);
+        if (js) {
+          handleClientMessage(sessionId, session, msg, js);
+        }
       } catch (err) {
         logger.error({ err, sessionId }, 'Failed to parse client message');
       }
@@ -194,47 +192,62 @@ async function startServer() {
     ws.send(JSON.stringify({ type: 'connected', sessionId, authenticated: !!authResult }));
   });
 
-  // Subscribe to NATS events and broadcast to relevant clients
-  const subjects = ['bug.created', 'bug.deduplicated', 'bug.classified', 'bug.triaged'];
-  
-  for (const subject of subjects) {
-    const sub = await js.subscribe(subject, { queue: 'ws-hub' });
-    
-    (async () => {
-      for await (const msg of sub) {
-        try {
-          const data = JSON.parse(sc.decode(msg.data));
-          const orgId = data.org_id ?? '';
-          const filePath = data.file_path ?? '';
-          const clients = registry.getByOrg(orgId);
+  // Connect to NATS (optional)
+  let js: JetStreamClient | null = null;
 
-          const eventType = subject.split('.').pop() ?? subject;
-          const payload = JSON.stringify({
-            type: `bug_${eventType === 'created' ? 'created' : 'updated'}`,
-            payload: data,
-          });
+  if (NATS_URL) {
+    try {
+      const nc = await connect({ servers: NATS_URL });
+      js = nc.jetstream();
+      logger.info({ url: NATS_URL }, 'Connected to NATS');
 
-          for (const client of clients) {
-            if (client.ws.readyState !== WebSocket.OPEN) continue;
+      // Subscribe to NATS events and broadcast to relevant clients
+      const subjects = ['bug.created', 'bug.deduplicated', 'bug.classified', 'bug.triaged'];
 
-            // File-path filtering: send to all if no filter, or match path
-            if (client.watchedFiles.length > 0 && filePath) {
-              const watching = client.watchedFiles.some(
-                (wp) => filePath.startsWith(wp) || filePath.includes(wp)
-              );
-              if (!watching) continue;
+      for (const subject of subjects) {
+        const sub = await js.subscribe(subject, { queue: 'ws-hub' });
+
+        (async () => {
+          for await (const msg of sub) {
+            try {
+              const data = JSON.parse(sc.decode(msg.data));
+              const orgId = data.org_id ?? '';
+              const filePath = data.file_path ?? '';
+              const clients = registry.getByOrg(orgId);
+
+              const eventType = subject.split('.').pop() ?? subject;
+              const payload = JSON.stringify({
+                type: `bug_${eventType === 'created' ? 'created' : 'updated'}`,
+                payload: data,
+              });
+
+              for (const client of clients) {
+                if (client.ws.readyState !== WebSocket.OPEN) continue;
+
+                // File-path filtering: send to all if no filter, or match path
+                if (client.watchedFiles.length > 0 && filePath) {
+                  const watching = client.watchedFiles.some(
+                    (wp) => filePath.startsWith(wp) || filePath.includes(wp)
+                  );
+                  if (!watching) continue;
+                }
+
+                client.ws.send(payload);
+              }
+
+              msg.ack();
+            } catch (err) {
+              logger.error({ err, subject }, 'Error broadcasting event');
+              msg.nak();
             }
-
-            client.ws.send(payload);
           }
-
-          msg.ack();
-        } catch (err) {
-          logger.error({ err, subject }, 'Error broadcasting event');
-          msg.nak();
-        }
+        })();
       }
-    })();
+    } catch (err) {
+      logger.warn({ err }, 'NATS not available — WebSocket hub running without event streaming');
+    }
+  } else {
+    logger.warn('NATS_URL is empty — WebSocket hub running without event streaming');
   }
 
   httpServer.listen(PORT, () => {
@@ -245,7 +258,6 @@ async function startServer() {
   const shutdown = async () => {
     logger.info('Shutting down...');
     wss.close();
-    await nc.close();
     httpServer.close();
     process.exit(0);
   };

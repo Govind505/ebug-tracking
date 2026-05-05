@@ -35,8 +35,13 @@ type Config struct {
 }
 
 func loadConfig() Config {
+	// Render sets PORT; fallback to HTTP_PORT for local dev
+	httpPort := getEnvInt("PORT", 0)
+	if httpPort == 0 {
+		httpPort = getEnvInt("HTTP_PORT", 8080)
+	}
 	return Config{
-		NatsURL:      getEnv("NATS_URL", "nats://localhost:4222"),
+		NatsURL:      getEnv("NATS_URL", ""),
 		DatabaseURL:  getEnv("DATABASE_URL", "postgres://ebug:ebug@localhost:5432/ebug?sslmode=disable"),
 		S3Bucket:     getEnv("S3_BUCKET", "ebug-storage"),
 		S3Region:     getEnv("S3_REGION", "us-east-1"),
@@ -44,7 +49,7 @@ func loadConfig() Config {
 		WorkerCount:  getEnvInt("WORKER_COUNT", 5),
 		BatchSize:    getEnvInt("BATCH_SIZE", 100),
 		FlushTimeout: time.Duration(getEnvInt("FLUSH_TIMEOUT_MS", 1000)) * time.Millisecond,
-		HTTPPort:     getEnvInt("HTTP_PORT", 8080),
+		HTTPPort:     httpPort,
 	}
 }
 
@@ -98,10 +103,21 @@ func NewWorker(config Config) (*Worker, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Connect to NATS
+	w := &Worker{
+		config: config,
+		db:     dbPool,
+		logger: logger,
+	}
+
+	// Connect to NATS (optional — skip if URL is empty)
+	if config.NatsURL == "" {
+		logger.Warn("NATS_URL is empty — running in HTTP-only mode (no event streaming)")
+		return w, nil
+	}
+
 	nc, err := nats.Connect(config.NatsURL,
 		nats.RetryOnFailedConnect(true),
-		nats.MaxReconnects(-1),
+		nats.MaxReconnects(5),
 		nats.ReconnectWait(time.Second),
 		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
 			logger.Warn("NATS disconnected", zap.Error(err))
@@ -111,13 +127,15 @@ func NewWorker(config Config) (*Worker, error) {
 		}),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
+		logger.Warn("NATS not available — running without event streaming", zap.Error(err))
+		return w, nil
 	}
 
 	// Initialize JetStream
 	js, err := nc.JetStream()
 	if err != nil {
-		return nil, fmt.Errorf("failed to init JetStream: %w", err)
+		logger.Warn("JetStream not available", zap.Error(err))
+		return w, nil
 	}
 
 	// Ensure stream exists
@@ -125,20 +143,16 @@ func NewWorker(config Config) (*Worker, error) {
 		Name:     "BUGS",
 		Subjects: []string{"bug.>"},
 		Storage:  nats.FileStorage,
-		MaxAge:   30 * 24 * time.Hour,    // 30 day retention
-		MaxBytes: 10 * 1024 * 1024 * 1024, // 10 GB
+		MaxAge:   30 * 24 * time.Hour,
+		MaxBytes: 10 * 1024 * 1024 * 1024,
 	})
 	if err != nil {
 		logger.Warn("Stream may already exist", zap.Error(err))
 	}
 
-	return &Worker{
-		config: config,
-		db:     dbPool,
-		nc:     nc,
-		js:     js,
-		logger: logger,
-	}, nil
+	w.nc = nc
+	w.js = js
+	return w, nil
 }
 
 func (w *Worker) Start(ctx context.Context) error {
@@ -149,6 +163,19 @@ func (w *Worker) Start(ctx context.Context) error {
 
 	// Start health/readiness HTTP server
 	go w.startHTTPServer(ctx)
+
+	// Mark as ready (health server is up)
+	w.ready.Store(true)
+
+	// If NATS is not available, just run the health server
+	if w.js == nil {
+		w.logger.Info("Running in HTTP-only mode (no NATS). Health server active.")
+		<-ctx.Done()
+		w.logger.Info("Shutting down ingestion worker")
+		w.ready.Store(false)
+		w.db.Close()
+		return nil
+	}
 
 	// Subscribe to incoming bug reports from the API gateway
 	sub, err := w.js.QueueSubscribe(
@@ -175,8 +202,6 @@ func (w *Worker) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to telemetry: %w", err)
 	}
 
-	// Mark as ready
-	w.ready.Store(true)
 	w.logger.Info("Ingestion worker started, listening for events")
 
 	<-ctx.Done()

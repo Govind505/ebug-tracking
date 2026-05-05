@@ -274,6 +274,33 @@ class SeverityScorerService:
 
 
 # ─────────────────────────────────────────────
+# HTTP Health Server (required by Render)
+# ─────────────────────────────────────────────
+
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok","service":"severity-scorer"}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    def log_message(self, format, *args):
+        pass  # Suppress request logs
+
+def start_health_server():
+    port = int(os.getenv("PORT", "10000"))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    logging.getLogger("health").info(f"Health server on port {port}")
+    server.serve_forever()
+
+
+# ─────────────────────────────────────────────
 # Entrypoint
 # ─────────────────────────────────────────────
 
@@ -285,23 +312,22 @@ async def main():
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
 
+    # Start HTTP health server in background thread
+    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    health_thread.start()
+
     service = SeverityScorerService(config)
 
-    loop = asyncio.get_event_loop()
-
-    def signal_handler():
-        asyncio.ensure_future(service.shutdown())
-        loop.stop()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, signal_handler)
-
-    try:
-        await service.start()
-    except asyncio.CancelledError:
-        pass
-    finally:
-        await service.shutdown()
+    # Retry NATS connection with backoff
+    while True:
+        try:
+            await service.start()
+            break
+        except Exception as e:
+            logging.getLogger("severity_scorer").warning(
+                f"NATS not available: {e}. Retrying in 30s..."
+            )
+            await asyncio.sleep(30)
 
 
 if __name__ == "__main__":

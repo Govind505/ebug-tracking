@@ -16,8 +16,7 @@
     "ws": "^8.17.0",
     "nats": "^2.19.0",
     "jsonwebtoken": "^9.0.0",
-    "pino": "^9.1.0",
-    "@ebug/core-proto": "*"
+    "pino": "^9.1.0"
   },
   "devDependencies": {
     "@types/ws": "^8.5.10",
