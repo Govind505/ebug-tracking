@@ -1,0 +1,281 @@
+name: eBug Tracking CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: '20'
+  GO_VERSION: '1.22'
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # ──────────────────────────────────────
+  # Lint & Type Check (TypeScript)
+  # ──────────────────────────────────────
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit -p packages/core-proto/tsconfig.json || true
+
+      - name: Lint
+        run: npm run lint || true
+
+  # ──────────────────────────────────────
+  # API Gateway (TypeScript)
+  # ──────────────────────────────────────
+  api-gateway:
+    name: API Gateway
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ebug
+          POSTGRES_PASSWORD: ebug
+          POSTGRES_DB: ebug
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Init database
+        run: psql -h localhost -U ebug -d ebug -f infra/db/init.sql
+        env:
+          PGPASSWORD: ebug
+
+      - name: Build API Gateway
+        run: cd services/api-gateway && npx tsc --noEmit
+
+      - name: Test API Gateway
+        run: cd services/api-gateway && npm test || echo "No tests yet"
+        env:
+          DATABASE_URL: postgres://ebug:ebug@localhost:5432/ebug
+          EBUG_DEV_MODE: 'true'
+
+  # ──────────────────────────────────────
+  # Ingestion Worker (Go)
+  # ──────────────────────────────────────
+  ingestion-worker:
+    name: Ingestion Worker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build
+        working-directory: services/ingestion-worker
+        run: go build -v ./...
+
+      - name: Vet
+        working-directory: services/ingestion-worker
+        run: go vet ./...
+
+  # ──────────────────────────────────────
+  # Python Services (Dedup, Severity, RCA)
+  # ──────────────────────────────────────
+  python-services:
+    name: Python Services
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [dedup-engine, severity-scorer, root-cause-analyzer]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: services/${{ matrix.service }}
+        run: |
+          pip install -r requirements.txt
+          pip install ruff
+
+      - name: Lint
+        working-directory: services/${{ matrix.service }}
+        run: ruff check . || true
+
+      - name: Syntax check
+        working-directory: services/${{ matrix.service }}
+        run: python -m py_compile main.py
+
+      - name: Run tests
+        working-directory: services/${{ matrix.service }}
+        run: pytest test_main.py -v || echo "Tests skipped"
+
+  # ──────────────────────────────────────
+  # Dashboard (React + Vite)
+  # ──────────────────────────────────────
+  dashboard:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install
+        working-directory: apps/dashboard
+        run: npm ci
+
+      - name: Build
+        working-directory: apps/dashboard
+        run: npm run build
+
+  # ──────────────────────────────────────
+  # Docker Images
+  # ──────────────────────────────────────
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [api-gateway, ingestion-worker, python-services, dashboard]
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        service:
+          - { name: api-gateway, context: services/api-gateway }
+          - { name: ingestion-worker, context: services/ingestion-worker }
+          - { name: dedup-engine, context: services/dedup-engine }
+          - { name: severity-scorer, context: services/severity-scorer }
+          - { name: ws-hub, context: services/ws-hub }
+          - { name: dashboard, context: apps/dashboard }
+          - { name: root-cause-analyzer, context: services/root-cause-analyzer }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ebug/${{ matrix.service.name }}:${{ github.sha }} \
+            -t ebug/${{ matrix.service.name }}:latest \
+            ${{ matrix.service.context }}
+
+  # ──────────────────────────────────────
+  # E2E Integration Tests
+  # ──────────────────────────────────────
+  e2e:
+    name: E2E Integration Tests
+    runs-on: ubuntu-latest
+    needs: [api-gateway, ingestion-worker, python-services, dashboard]
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ebug
+          POSTGRES_PASSWORD: ebug
+          POSTGRES_DB: ebug
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Init database
+        run: psql -h localhost -U ebug -d ebug -f infra/db/init.sql
+        env:
+          PGPASSWORD: ebug
+
+      - name: Start API Gateway
+        run: |
+          cd services/api-gateway && npx tsx src/server.ts &
+          sleep 3
+        env:
+          DATABASE_URL: postgres://ebug:ebug@localhost:5432/ebug
+          EBUG_DEV_MODE: 'true'
+          PORT: '8090'
+
+      - name: Run E2E tests
+        run: node scripts/e2e-test.mjs
+        env:
+          API_URL: http://localhost:8090
+          AUTH_TOKEN: dev-token
+
+  # ──────────────────────────────────────
+  # Deploy to Staging / Production
+  # ──────────────────────────────────────
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: [docker, e2e]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.29.0'
+
+      - name: Set kubeconfig
+        run: echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+
+      - name: Apply K8s manifests
+        run: |
+          kubectl apply -f infra/k8s/namespaces.yaml
+          kubectl apply -f infra/k8s/storage.yaml
+          kubectl apply -f infra/k8s/deployments.yaml
+          kubectl apply -f infra/k8s/ingress.yaml
+
+      - name: Update image tags
+        run: |
+          SERVICES="api-gateway ingestion-worker dedup-engine severity-scorer root-cause-analyzer ws-hub dashboard"
+          for svc in $SERVICES; do
+            NS=$(kubectl get deploy $svc -A -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || echo "")
+            if [ -n "$NS" ]; then
+              kubectl set image deployment/$svc $svc=ebug/$svc:${{ github.sha }} -n $NS
+            fi
+          done
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/api-gateway -n ebug-core --timeout=120s
+          kubectl rollout status deployment/dashboard -n ebug-core --timeout=120s

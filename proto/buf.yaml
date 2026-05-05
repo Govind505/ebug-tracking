@@ -1,0 +1,14 @@
+version: v2
+modules:
+  - path: .
+    name: buf.build/ebug-tracking/ebug
+deps:
+  - buf.build/googleapis/googleapis
+breaking:
+  use:
+    - FILE
+lint:
+  use:
+    - DEFAULT
+  except:
+    - PACKAGE_VERSION_SUFFIX

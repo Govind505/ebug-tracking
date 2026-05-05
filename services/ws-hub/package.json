@@ -1,0 +1,30 @@
+{
+  "name": "@ebug/ws-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WebSocket hub for real-time push notifications to IDE plugins",
+  "type": "module",
+  "main": "src/server.ts",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "ws": "^8.17.0",
+    "nats": "^2.19.0",
+    "jsonwebtoken": "^9.0.0",
+    "pino": "^9.1.0",
+    "@ebug/core-proto": "*"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.10",
+    "@types/jsonwebtoken": "^9.0.6",
+    "typescript": "^5.5.0",
+    "tsx": "^4.15.0",
+    "vitest": "^1.6.0",
+    "rimraf": "^5.0.0"
+  }
+}

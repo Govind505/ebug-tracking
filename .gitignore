@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+vendor/
+__pycache__/
+*.pyc
+.venv/
+
+# Build outputs
+dist/
+build/
+*.js.map
+*.d.ts
+!packages/core-proto/src/**/*.d.ts
+
+# IDE
+.idea/
+*.swp
+*.swo
+.vscode/settings.json
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-data/
+
+# Go
+/services/*/tmp/
+
+# Generated proto
+packages/core-proto/src/gen/
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Logs
+*.log
+logs/

@@ -1,0 +1,102 @@
+# eBug Tracking — Local Development Stack
+# Run: docker compose up -d
+
+services:
+  # ── Data Layer ──
+  postgres:
+    image: postgres:16-alpine
+    container_name: ebug-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ebug
+      POSTGRES_PASSWORD: ebug
+      POSTGRES_DB: ebug
+    volumes:
+      - ./infra/db/init.sql:/docker-entrypoint-initdb.d/001_init.sql
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ebug"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ebug-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: ebug-nats
+    ports:
+      - "4222:4222"
+      - "8222:8222"  # monitoring
+    command: ["--jetstream", "--store_dir=/data", "--http_port=8222"]
+    volumes:
+      - natsdata:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: ebug-milvus-etcd
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+    command: ["etcd", "-advertise-client-urls=http://127.0.0.1:2379", "-listen-client-urls=http://0.0.0.0:2379"]
+    volumes:
+      - etcddata:/etcd
+
+  milvus-minio:
+    image: minio/minio:latest
+    container_name: ebug-milvus-minio
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: ["minio", "server", "/minio_data"]
+    volumes:
+      - miniodata:/minio_data
+
+  milvus:
+    image: milvusdb/milvus:v2.4-latest
+    container_name: ebug-milvus
+    ports:
+      - "19530:19530"
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+    depends_on:
+      - milvus-etcd
+      - milvus-minio
+
+  # ── S3-compatible Object Store (MinIO) ──
+  minio:
+    image: minio/minio:latest
+    container_name: ebug-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ebugadmin
+      MINIO_ROOT_PASSWORD: ebugadmin123
+    command: ["server", "/data", "--console-address", ":9001"]
+    volumes:
+      - s3data:/data
+
+volumes:
+  pgdata:
+  natsdata:
+  etcddata:
+  miniodata:
+  s3data:

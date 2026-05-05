@@ -1,0 +1,216 @@
+syntax = "proto3";
+
+package ebug.v1;
+
+option go_package = "github.com/ebug-tracking/ebug/gen/ebug/v1;ebugv1";
+
+import "ebug/v1/bug_report.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// ─────────────────────────────────────────────
+// Bug Tracking Service — Primary CRUD + Triage
+// ─────────────────────────────────────────────
+
+service BugService {
+  // Create a new bug report
+  rpc CreateBug(CreateBugRequest) returns (CreateBugResponse);
+  
+  // Get a single bug by ID
+  rpc GetBug(GetBugRequest) returns (BugReport);
+  
+  // List bugs with filtering
+  rpc ListBugs(ListBugsRequest) returns (ListBugsResponse);
+  
+  // Update bug fields (partial update)
+  rpc UpdateBug(UpdateBugRequest) returns (BugReport);
+  
+  // Transition bug status
+  rpc TransitionStatus(TransitionStatusRequest) returns (BugReport);
+  
+  // Get activity history for a bug
+  rpc GetBugActivity(GetBugActivityRequest) returns (GetBugActivityResponse);
+  
+  // Real-time stream of bug updates (IDE ← Cloud)
+  rpc StreamBugUpdates(StreamBugUpdatesRequest) returns (stream BugUpdateEvent);
+  
+  // Bulk ingest from telemetry (IDE → Cloud)
+  rpc IngestTelemetry(stream TelemetryEvent) returns (IngestTelemetryResponse);
+}
+
+// ─────────────────────────────────────────────
+// Request / Response Messages
+// ─────────────────────────────────────────────
+
+message CreateBugRequest {
+  string org_id = 1;
+  string title = 2;
+  string description = 3;
+  string stack_trace = 4;
+  CodeLocation code_location = 5;
+  SourceType source_type = 6;
+  string source_ide = 7;
+  string source_plugin_version = 8;
+  RuntimeEnvironment environment = 9;
+  repeated string log_blob_keys = 10;
+  repeated string screenshot_keys = 11;
+  
+  // Optional: client-side pre-classification hints
+  Severity severity_hint = 12;
+  Category category_hint = 13;
+}
+
+message CreateBugResponse {
+  BugReport bug = 1;
+  bool was_deduplicated = 2;
+  string canonical_bug_id = 3;              // Set if deduplicated
+  double dedup_confidence = 4;
+}
+
+message GetBugRequest {
+  string id = 1;
+  string org_id = 2;
+}
+
+message ListBugsRequest {
+  string org_id = 1;
+  
+  // Filters
+  repeated BugStatus statuses = 2;
+  repeated Severity severities = 3;
+  repeated Category categories = 4;
+  string assignee_id = 5;
+  string team_id = 6;
+  string search_query = 7;                  // Full-text search
+  
+  // Pagination
+  int32 page_size = 8;
+  string page_token = 9;
+  
+  // Sort
+  string order_by = 10;                     // "created_at", "severity", "priority"
+  bool descending = 11;
+}
+
+message ListBugsResponse {
+  repeated BugReport bugs = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+message UpdateBugRequest {
+  string id = 1;
+  string org_id = 2;
+  
+  // Fields to update (only set fields are applied)
+  optional string title = 3;
+  optional string description = 4;
+  optional Severity severity = 5;
+  optional Category category = 6;
+  optional string assignee_id = 7;
+  optional string team_id = 8;
+  optional int32 priority = 9;
+  repeated string add_pr_urls = 10;
+  repeated string add_ci_run_ids = 11;
+}
+
+message TransitionStatusRequest {
+  string id = 1;
+  string org_id = 2;
+  BugStatus new_status = 3;
+  string comment = 4;                       // Optional transition comment
+}
+
+message GetBugActivityRequest {
+  string bug_id = 1;
+  string org_id = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message GetBugActivityResponse {
+  repeated BugActivity activities = 1;
+  string next_page_token = 2;
+}
+
+// ─────────────────────────────────────────────
+// Streaming Messages (Real-time IDE Sync)
+// ─────────────────────────────────────────────
+
+message StreamBugUpdatesRequest {
+  string org_id = 1;
+  string user_id = 2;
+  
+  // Optional: only stream updates for specific bugs
+  repeated string bug_ids = 3;
+  
+  // Optional: only stream updates for bugs in these files
+  repeated string file_paths = 4;
+  
+  // Resume from a specific point
+  string resume_token = 5;
+}
+
+message BugUpdateEvent {
+  string event_id = 1;
+  string bug_id = 2;
+  string event_type = 3;                    // "created", "updated", "status_changed", "assigned", "commented"
+  BugReport current_state = 4;
+  BugActivity activity = 5;
+  google.protobuf.Timestamp timestamp = 6;
+  string resume_token = 7;                  // For reconnection
+}
+
+// ─────────────────────────────────────────────
+// Telemetry Ingestion (IDE → Cloud)
+// ─────────────────────────────────────────────
+
+message TelemetryEvent {
+  string session_id = 1;
+  string org_id = 2;
+  string user_id = 3;
+  
+  oneof payload {
+    ExceptionEvent exception = 4;
+    ErrorLogEvent error_log = 5;
+    PerformanceEvent performance = 6;
+    UserActionEvent user_action = 7;
+  }
+  
+  google.protobuf.Timestamp timestamp = 8;
+}
+
+message ExceptionEvent {
+  string exception_type = 1;
+  string message = 2;
+  string stack_trace = 3;
+  CodeLocation location = 4;
+  RuntimeEnvironment environment = 5;
+}
+
+message ErrorLogEvent {
+  string level = 1;                          // "error", "warn", "fatal"
+  string message = 2;
+  string logger = 3;
+  map<string, string> context = 4;
+}
+
+message PerformanceEvent {
+  string metric_name = 1;
+  double value = 2;
+  string unit = 3;                           // "ms", "bytes", "count"
+  map<string, string> labels = 4;
+}
+
+message UserActionEvent {
+  string action = 1;                         // "file_save", "debug_start", "test_run"
+  string target = 2;
+  map<string, string> metadata = 3;
+}
+
+message IngestTelemetryResponse {
+  int32 events_received = 1;
+  int32 events_processed = 2;
+  int32 bugs_created = 3;
+  repeated string created_bug_ids = 4;
+}

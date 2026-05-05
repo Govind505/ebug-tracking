@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ebug-models-pvc
+  namespace: ebug-ai
+  labels:
+    app.kubernetes.io/part-of: ebug-tracking
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ebug-db-credentials
+  namespace: ebug-core
+  labels:
+    app.kubernetes.io/part-of: ebug-tracking
+type: Opaque
+data:
+  url: cG9zdGdyZXM6Ly9lYnVnOmVidWdAcG9zdGdyZXMuZWJ1Zy1kYXRhLnN2Yy5jbHVzdGVyLmxvY2FsOjU0MzIvZWJ1Zw==
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ebug-db-credentials
+  namespace: ebug-ingestion
+  labels:
+    app.kubernetes.io/part-of: ebug-tracking
+type: Opaque
+data:
+  url: cG9zdGdyZXM6Ly9lYnVnOmVidWdAcG9zdGdyZXMuZWJ1Zy1kYXRhLnN2Yy5jbHVzdGVyLmxvY2FsOjU0MzIvZWJ1Zw==
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ebug-db-credentials
+  namespace: ebug-ai
+  labels:
+    app.kubernetes.io/part-of: ebug-tracking
+type: Opaque
+data:
+  url: cG9zdGdyZXM6Ly9lYnVnOmVidWdAcG9zdGdyZXMuZWJ1Zy1kYXRhLnN2Yy5jbHVzdGVyLmxvY2FsOjU0MzIvZWJ1Zw==
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ebug-llm-credentials
+  namespace: ebug-ai
+  labels:
+    app.kubernetes.io/part-of: ebug-tracking
+type: Opaque
+data:
+  api-key: c2stcGxhY2Vob2xkZXItcmVwbGFjZS1pbi1wcm9kdWN0aW9u
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ebug-jwt-secret
+  namespace: ebug-core
+  labels:
+    app.kubernetes.io/part-of: ebug-tracking
+type: Opaque
+data:
+  secret: ZWJ1Zy1kZXYtc2VjcmV0

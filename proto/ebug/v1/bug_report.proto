@@ -1,0 +1,141 @@
+syntax = "proto3";
+
+package ebug.v1;
+
+option go_package = "github.com/ebug-tracking/ebug/gen/ebug/v1;ebugv1";
+
+import "google/protobuf/timestamp.proto";
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_INFO = 1;
+  SEVERITY_LOW = 2;
+  SEVERITY_MEDIUM = 3;
+  SEVERITY_HIGH = 4;
+  SEVERITY_CRITICAL = 5;
+}
+
+enum BugStatus {
+  BUG_STATUS_UNSPECIFIED = 0;
+  BUG_STATUS_OPEN = 1;
+  BUG_STATUS_TRIAGED = 2;
+  BUG_STATUS_IN_PROGRESS = 3;
+  BUG_STATUS_IN_REVIEW = 4;
+  BUG_STATUS_RESOLVED = 5;
+  BUG_STATUS_CLOSED = 6;
+  BUG_STATUS_WONT_FIX = 7;
+}
+
+enum SourceType {
+  SOURCE_TYPE_UNSPECIFIED = 0;
+  SOURCE_TYPE_IDE_AUTO = 1;       // Auto-detected by telemetry
+  SOURCE_TYPE_IDE_MANUAL = 2;     // Manually filed from IDE
+  SOURCE_TYPE_CI = 3;             // CI/CD pipeline failure
+  SOURCE_TYPE_RUNTIME = 4;        // Production runtime error
+  SOURCE_TYPE_API = 5;            // External API submission
+}
+
+enum Category {
+  CATEGORY_UNSPECIFIED = 0;
+  CATEGORY_CRASH = 1;
+  CATEGORY_PERFORMANCE = 2;
+  CATEGORY_LOGIC = 3;
+  CATEGORY_UI = 4;
+  CATEGORY_SECURITY = 5;
+  CATEGORY_DEPENDENCY = 6;
+}
+
+// ─────────────────────────────────────────────
+// Core Messages
+// ─────────────────────────────────────────────
+
+message BugReport {
+  string id = 1;                              // UUID
+  string external_id = 2;                     // Human-readable: EBUG-1234
+  string org_id = 3;
+
+  // Source
+  SourceType source_type = 4;
+  string source_ide = 5;                      // "vscode", "intellij", "cli"
+  string source_plugin_version = 6;
+
+  // Content
+  string title = 7;
+  string description = 8;
+  string stack_trace = 9;
+  CodeLocation code_location = 10;
+
+  // Classification (AI-populated)
+  Severity severity = 11;
+  double severity_score = 12;                 // 0.0 - 1.0 confidence
+  Category category = 13;
+  string root_cause_suggestion = 14;
+
+  // Deduplication
+  string canonical_id = 15;
+  bool is_duplicate = 16;
+  double similarity_score = 17;
+
+  // Assignment
+  BugStatus status = 18;
+  string assignee_id = 19;
+  string team_id = 20;
+  int32 priority = 21;
+
+  // Environment
+  RuntimeEnvironment environment = 22;
+
+  // Linked resources
+  repeated string pr_urls = 23;
+  repeated string ci_run_ids = 24;
+  repeated string log_blob_keys = 25;
+  repeated string screenshot_keys = 26;
+
+  // Timestamps
+  google.protobuf.Timestamp created_at = 27;
+  google.protobuf.Timestamp updated_at = 28;
+  google.protobuf.Timestamp resolved_at = 29;
+
+  string created_by = 30;
+}
+
+message CodeLocation {
+  string file_path = 1;
+  int32 line_number = 2;
+  int32 column_number = 3;
+  string code_snippet = 4;                    // Surrounding lines
+  string function_name = 5;
+  string language = 6;                        // "typescript", "python", "go", etc.
+}
+
+message RuntimeEnvironment {
+  string os = 1;
+  string os_version = 2;
+  string runtime = 3;                         // "node", "python", "go"
+  string runtime_version = 4;
+  string framework = 5;                       // "next.js", "django", "gin"
+  string framework_version = 6;
+  string repo_url = 7;
+  string branch = 8;
+  string commit_sha = 9;
+  map<string, string> custom_tags = 10;
+}
+
+// ─────────────────────────────────────────────
+// Activity
+// ─────────────────────────────────────────────
+
+message BugActivity {
+  string id = 1;
+  string bug_id = 2;
+  string actor_id = 3;
+  string actor_type = 4;                      // "user", "system", "ai"
+  string action = 5;                          // "created", "status_change", etc.
+  string old_value = 6;
+  string new_value = 7;
+  google.protobuf.Timestamp created_at = 8;
+}

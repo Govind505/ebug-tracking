@@ -1,0 +1,22 @@
+{
+  "name": "@ebug/core-proto",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Generated TypeScript types from eBug protobuf definitions",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist",
+    "generate": "node ../../scripts/proto-gen.mjs"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^1.9.0",
+    "@connectrpc/connect": "^1.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "rimraf": "^5.0.0"
+  }
+}

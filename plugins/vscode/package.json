@@ -1,0 +1,110 @@
+{
+  "name": "ebug-vscode",
+  "displayName": "eBug Tracking",
+  "description": "Universal Quality Fabric — AI-powered bug tracking inside your IDE",
+  "version": "0.1.0",
+  "publisher": "ebug-tracking",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Debuggers", "Testing", "Other"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ebug-sidebar",
+          "title": "eBug Tracking",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "ebug-sidebar": [
+        {
+          "id": "ebug.bugList",
+          "name": "Bug Reports",
+          "type": "webview"
+        },
+        {
+          "id": "ebug.fileBugs",
+          "name": "Bugs in This File"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "ebug.reportBug",
+        "title": "eBug: Report Bug",
+        "category": "eBug"
+      },
+      {
+        "command": "ebug.refreshBugs",
+        "title": "eBug: Refresh Bug List",
+        "category": "eBug"
+      },
+      {
+        "command": "ebug.showBugDetails",
+        "title": "eBug: Show Bug Details",
+        "category": "eBug"
+      },
+      {
+        "command": "ebug.toggleSync",
+        "title": "eBug: Toggle Cloud Sync",
+        "category": "eBug"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ebug.reportBug",
+        "key": "ctrl+shift+b",
+        "mac": "cmd+shift+b"
+      }
+    ],
+    "configuration": {
+      "title": "eBug Tracking",
+      "properties": {
+        "ebug.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:8082",
+          "description": "eBug Cloud server URL"
+        },
+        "ebug.orgId": {
+          "type": "string",
+          "default": "",
+          "description": "Organization ID"
+        },
+        "ebug.autoDetect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically detect and report runtime errors"
+        },
+        "ebug.telemetryEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Send anonymous telemetry to improve bug detection"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs",
+    "dev": "npm run build -- --watch",
+    "vsce:package": "npm run build && npx @vscode/vsce package --no-dependencies",
+    "vsce:publish": "npm run build && npx @vscode/vsce publish --no-dependencies",
+    "clean": "rimraf dist *.vsix"
+  },
+  "dependencies": {
+    "@ebug/core-sync": "*",
+    "@ebug/core-proto": "*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.21.0",
+    "typescript": "^5.5.0",
+    "rimraf": "^5.0.0"
+  }
+}

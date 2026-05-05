@@ -1,0 +1,382 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestion-worker
+  namespace: ebug-ingestion
+  labels:
+    app: ingestion-worker
+    app.kubernetes.io/part-of: ebug-tracking
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ingestion-worker
+  template:
+    metadata:
+      labels:
+        app: ingestion-worker
+    spec:
+      containers:
+        - name: ingestion-worker
+          image: ebug/ingestion-worker:latest
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          env:
+            - name: NATS_URL
+              value: "nats://nats.ebug-data.svc.cluster.local:4222"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ebug-db-credentials
+                  key: url
+            - name: S3_BUCKET
+              value: "ebug-storage"
+            - name: WORKER_COUNT
+              value: "5"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ws-hub
+  namespace: ebug-ingestion
+  labels:
+    app: ws-hub
+    app.kubernetes.io/part-of: ebug-tracking
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ws-hub
+  template:
+    metadata:
+      labels:
+        app: ws-hub
+    spec:
+      containers:
+        - name: ws-hub
+          image: ebug/ws-hub:latest
+          ports:
+            - containerPort: 8082
+              name: ws
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          env:
+            - name: NATS_URL
+              value: "nats://nats.ebug-data.svc.cluster.local:4222"
+            - name: PORT
+              value: "8082"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ws-hub
+  namespace: ebug-ingestion
+spec:
+  selector:
+    app: ws-hub
+  ports:
+    - port: 8082
+      targetPort: ws
+      protocol: TCP
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dedup-engine
+  namespace: ebug-ai
+  labels:
+    app: dedup-engine
+    app.kubernetes.io/part-of: ebug-tracking
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dedup-engine
+  template:
+    metadata:
+      labels:
+        app: dedup-engine
+    spec:
+      containers:
+        - name: dedup-engine
+          image: ebug/dedup-engine:latest
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          env:
+            - name: NATS_URL
+              value: "nats://nats.ebug-data.svc.cluster.local:4222"
+            - name: VECTOR_DB_URL
+              value: "http://milvus.ebug-data.svc.cluster.local:19530"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ebug-db-credentials
+                  key: url
+            - name: SIMILARITY_THRESHOLD
+              value: "0.92"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: severity-scorer
+  namespace: ebug-ai
+  labels:
+    app: severity-scorer
+    app.kubernetes.io/part-of: ebug-tracking
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: severity-scorer
+  template:
+    metadata:
+      labels:
+        app: severity-scorer
+    spec:
+      containers:
+        - name: severity-scorer
+          image: ebug/severity-scorer:latest
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          env:
+            - name: NATS_URL
+              value: "nats://nats.ebug-data.svc.cluster.local:4222"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ebug-db-credentials
+                  key: url
+            - name: MODEL_PATH
+              value: "/models/severity_model.pkl"
+          volumeMounts:
+            - name: model-storage
+              mountPath: /models
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: ebug-models-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: root-cause-analyzer
+  namespace: ebug-ai
+  labels:
+    app: root-cause-analyzer
+    app.kubernetes.io/part-of: ebug-tracking
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: root-cause-analyzer
+  template:
+    metadata:
+      labels:
+        app: root-cause-analyzer
+    spec:
+      containers:
+        - name: root-cause-analyzer
+          image: ebug/root-cause-analyzer:latest
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+          env:
+            - name: NATS_URL
+              value: "nats://nats.ebug-data.svc.cluster.local:4222"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ebug-db-credentials
+                  key: url
+            - name: VECTOR_DB_URL
+              value: "http://milvus.ebug-data.svc.cluster.local:19530"
+            - name: LLM_PROVIDER
+              value: "openai"
+            - name: LLM_MODEL
+              value: "gpt-4o"
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ebug-llm-credentials
+                  key: api-key
+            - name: MIN_SEVERITY_FOR_LLM
+              value: "medium"
+            - name: MAX_CONCURRENT_ANALYSES
+              value: "3"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: ebug-core
+  labels:
+    app: api-gateway
+    app.kubernetes.io/part-of: ebug-tracking
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: ebug/api-gateway:latest
+          ports:
+            - containerPort: 8090
+              name: http
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          env:
+            - name: NATS_URL
+              value: "nats://nats.ebug-data.svc.cluster.local:4222"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ebug-db-credentials
+                  key: url
+            - name: PORT
+              value: "8090"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: ebug-core
+spec:
+  selector:
+    app: api-gateway
+  ports:
+    - port: 8090
+      targetPort: http
+      protocol: TCP
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingestion-worker
+  namespace: ebug-ingestion
+spec:
+  selector:
+    app: ingestion-worker
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: ebug-core
+  labels:
+    app: dashboard
+    app.kubernetes.io/part-of: ebug-tracking
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dashboard
+  template:
+    metadata:
+      labels:
+        app: dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: ebug/dashboard:latest
+          ports:
+            - containerPort: 3000
+              name: http
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: ebug-core
+spec:
+  selector:
+    app: dashboard
+  ports:
+    - port: 3000
+      targetPort: http
+      protocol: TCP
+  type: ClusterIP

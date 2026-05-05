@@ -1,0 +1,155 @@
+# eBug Tracking — Render Blueprint
+# Deploy everything with one click: https://render.com/deploy
+# This file defines all backend services + databases
+
+databases:
+  - name: ebug-postgres
+    plan: free
+    databaseName: ebug
+    user: ebug
+    ipAllowList: []  # Allow all (required for free tier)
+    postgresMajorVersion: "16"
+
+services:
+  # ── API Gateway (Node.js) ──
+  - type: web
+    name: ebug-api-gateway
+    runtime: node
+    plan: free
+    rootDir: services/api-gateway
+    buildCommand: npm install && npx tsc
+    startCommand: node dist/server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ebug-postgres
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: NATS_URL
+        value: ""  # Leave empty — API Gateway has a direct-DB fallback
+      - key: LOG_LEVEL
+        value: info
+      - key: EBUG_DEV_MODE
+        value: "false"
+
+  # ── WebSocket Hub (Node.js) ──
+  - type: web
+    name: ebug-ws-hub
+    runtime: node
+    plan: free
+    rootDir: services/ws-hub
+    buildCommand: npm install && npx tsc
+    startCommand: node dist/server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: NATS_URL
+        value: ""
+      - key: JWT_SECRET
+        generateValue: true
+      - key: EBUG_DEV_MODE
+        value: "false"
+      - key: LOG_LEVEL
+        value: info
+
+  # ── Ingestion Worker (Go) ──
+  - type: web
+    name: ebug-ingestion-worker
+    runtime: go
+    plan: free
+    rootDir: services/ingestion-worker
+    buildCommand: go build -o app .
+    startCommand: ./app
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ebug-postgres
+          property: connectionString
+      - key: NATS_URL
+        value: ""
+      - key: S3_ENDPOINT
+        value: ""
+      - key: S3_BUCKET
+        value: ebug-storage
+
+  # ── Severity Scorer (Python) ──
+  - type: web
+    name: ebug-severity-scorer
+    runtime: python
+    plan: free
+    rootDir: services/severity-scorer
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -u main.py
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ebug-postgres
+          property: connectionString
+      - key: NATS_URL
+        value: ""
+      - key: LOG_LEVEL
+        value: info
+
+  # ── Dedup Engine (Python) ──
+  - type: web
+    name: ebug-dedup-engine
+    runtime: python
+    plan: free
+    rootDir: services/dedup-engine
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -u main.py
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ebug-postgres
+          property: connectionString
+      - key: NATS_URL
+        value: ""
+      - key: VECTOR_DB_URL
+        value: ""
+      - key: VECTOR_DB_TYPE
+        value: milvus
+      - key: SIMILARITY_THRESHOLD
+        value: "0.92"
+
+  # ── Root Cause Analyzer (Python) ──
+  - type: web
+    name: ebug-root-cause-analyzer
+    runtime: python
+    plan: free
+    rootDir: services/root-cause-analyzer
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -u main.py
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ebug-postgres
+          property: connectionString
+      - key: NATS_URL
+        value: ""
+      - key: LLM_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        value: ""
+      - key: LLM_MODEL
+        value: gpt-4o
+      - key: LOG_LEVEL
+        value: info
