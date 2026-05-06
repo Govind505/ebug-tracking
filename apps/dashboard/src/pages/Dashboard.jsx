@@ -40,7 +40,17 @@ export default function Dashboard() {
           setApiConnected(true)
         }
         if (bugsResult?.bugs) {
-          setLiveBugs(bugsResult.bugs)
+          setLiveBugs(bugsResult.bugs.map(b => ({
+            ...b,
+            externalId: b.external_id || b.externalId,
+            severityScore: b.severity_score || b.severityScore || 0,
+            filePath: b.file_path || b.filePath || '',
+            lineNumber: b.line_number || b.lineNumber || 0,
+            createdAt: b.created_at || b.createdAt,
+            source: b.source_type || b.source || 'api',
+            assignee: b.assignee_id ? { name: b.display_name || 'Assigned', avatar: 'AU' } : (b.assignee || null),
+            team: b.team_id || b.team || 'Unassigned',
+          })))
         }
       } catch {
         // API unavailable — mock data used
@@ -280,7 +290,7 @@ export default function Dashboard() {
             </button>
           </div>
           <div className="card-body" style={{ padding: 0 }}>
-            {MOCK_BUGS.filter(b => b.severity === 'critical' || b.severity === 'high')
+            {bugs.filter(b => b.severity === 'critical' || b.severity === 'high')
               .filter(b => !['resolved', 'closed'].includes(b.status))
               .map((bug, i) => (
                 <div
